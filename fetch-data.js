@@ -16,6 +16,10 @@ if (!API_KEY || API_KEY === 'your_api_key_here') {
 const FETCH_DETAILS = process.env.FETCH_DETAILS === 'true';
 const DETAIL_TOP_N = Math.max(1, parseInt(process.env.DETAIL_TOP_N || '50', 10));
 
+// FORCE=true 时忽略 dataVersion 比对，强制全量重新拉取（用于修复解析 bug 后重刷数据）。
+// 用法：FORCE=true npm run sync
+const FORCE = process.env.FORCE === 'true';
+
 async function run() {
   console.log('[sync] 开始拉取数据...');
 
@@ -28,12 +32,15 @@ async function run() {
   const lastVersion = getMeta('dataVersion');
   console.log(`[sync] dataVersion local=${lastVersion || 'none'} remote=${dataVersion}`);
 
-  // 数据未变更则跳过全量拉取，省 credits
-  if (lastVersion && lastVersion === dataVersion) {
+  // 数据未变更则跳过全量拉取，省 credits（FORCE=true 时强制重拉，用于修复解析 bug 后重刷）
+  if (!FORCE && lastVersion && lastVersion === dataVersion) {
     console.log('[sync] 数据未变更，跳过全量拉取（节省 credits）');
     setMeta('version', version);
     setMeta('updatedAt', updatedAt);
     return;
+  }
+  if (FORCE) {
+    console.log('[sync] FORCE=true，强制全量重新拉取');
   }
 
   // 2) 英雄榜单

@@ -10,7 +10,11 @@ if (!API_KEY || API_KEY === 'your_api_key_here') {
   process.exit(1);
 }
 
-const FETCH_DETAILS = process.env.FETCH_DETAILS !== 'false';
+// 默认关闭英雄详情同步：免费额度仅 200 credits/天，全量 173 英雄×2 远超额度。
+// 仅在做“英雄详情页”时开启：FETCH_DETAILS=true npm run sync
+// 且只拉胜率前 DETAIL_TOP_N 名以控制成本（默认 50，约 100 credits）。
+const FETCH_DETAILS = process.env.FETCH_DETAILS === 'true';
+const DETAIL_TOP_N = Math.max(1, parseInt(process.env.DETAIL_TOP_N || '50', 10));
 
 async function run() {
   console.log('[sync] 开始拉取数据...');
@@ -68,23 +72,39 @@ async function run() {
   txItem(itemsRaw);
   console.log('[sync] 装备库已写入');
 
-  // 5) 每个英雄详情（按需开关，默认开）
+  // 5) 英雄详情（默认关闭，避免超额度；开启时只拉胜率前 N 名）
   if (FETCH_DETAILS) {
     const upsertDetail = db.prepare(
       'INSERT OR REPLACE INTO champion_detail (id, payload, updatedAt) VALUES (?, ?, ?)'
     );
     const now = new Date().toISOString();
+    const topChampions = champions
+      .slice()
+      .sort((a, b) => b.winRate - a.winRate)
+      .slice(0, DETAIL_TOP_N);
     let ok = 0;
-    for (const c of champions) {
+    let quotaHit = false;
+    for (let i = 0; i < topChampions.length; i++) {
+      const c = topChampions[i];
       try {
         const detail = await fetchThrottled(`/champions/${c.id}.json`, { apiKey: API_KEY });
         upsertDetail.run(c.id, JSON.stringify(detail), now);
         ok++;
       } catch (e) {
+        if (e.message === 'QUOTA_EXCEEDED') {
+          quotaHit = true;
+          console.warn('[sync] 当日 API 额度耗尽，停止拉取剩余英雄详情');
+          break;
+        }
         console.warn(`[sync] 英雄 ${c.id} 详情失败: ${e.message}`);
       }
+      if ((i + 1) % 10 === 0) {
+        console.log(`[sync] 英雄详情进度 ${i + 1}/${topChampions.length}`);
+      }
     }
-    console.log(`[sync] 英雄详情 ${ok}/${champions.length} 条`);
+    console.log(`[sync] 英雄详情 ${ok}/${topChampions.length} 条${quotaHit ? '（额度耗尽提前结束）' : ''}`);
+  } else {
+    console.log('[sync] 跳过英雄详情（默认关闭，开启：FETCH_DETAILS=true）');
   }
 
   // 6) 写回 meta

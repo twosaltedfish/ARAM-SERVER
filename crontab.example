@@ -1,0 +1,4 @@
+# 海克斯大乱斗数据后端 —— 每日定时拉取
+# 用法：crontab -e 后粘贴下面一行，并把路径改成你服务器上的实际路径
+# 每天 03:07 执行（避开整点高峰），输出追加到日志，出错也记录
+7 3 * * * cd /path/to/aram-backend/backend && /usr/bin/node fetch-data.js >> /path/to/aram-backend/backend/logs/sync.log 2>&1

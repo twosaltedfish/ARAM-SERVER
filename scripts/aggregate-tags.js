@@ -2,15 +2,18 @@
 
 // 聚合所有已同步英雄（champion_detail 表）中 builds 的标签种类。
 // 标签字段：builds[].tags.primary_tags_f3pie，多个标签用 "," 分隔。
-// 用法：node scripts/aggregate-tags.js   （DB 路径默认 data/aram.db，可用 DB_PATH 覆盖）
+// 用法：node scripts/aggregate-tags.js   （DB 路径默认 data/aram.db，可用 .env 的 DB_PATH 或环境变量覆盖）
 //
 // 输出：
 //   1) 控制台打印总览（英雄数 / 出装数 / 标签种类数 / 按频率排序的标签表）
 //   2) JSON 落盘到 backend/tmp/tags-summary.json
 
+require('dotenv').config(); // 必须在 require('../db') 之前，否则读不到 .env 里的 DB_PATH
 const fs = require('fs');
 const path = require('path');
-const { db } = require('../db');
+const { db, DB_PATH } = require('../db');
+
+console.log('[aggregate-tags] 使用数据库：' + DB_PATH);
 
 const TAG_FIELD = 'primary_tags_f3pie';
 const OUT_DIR = path.join(__dirname, '..', 'tmp');

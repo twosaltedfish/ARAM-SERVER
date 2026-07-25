@@ -13,8 +13,8 @@ console.log(`[sync] 已加载 ${keyPoolSize()} 个 API Key，将自动负载均�
 // 英雄详情同步：拉取全部英雄详情（champions/{id}.json，全量 173 名）。
 // 全量 173 英雄×2 ≈ 346 credits，需配置多 Key（DTODO_API_KEYS）叠加额度（如 2 Key=400/天）；
 // 单 Key(200/天)不够，额度耗尽会中途停止（QUOTA_EXCEEDED）。开启：FETCH_DETAILS=true。
-// 缓存：每条详情记录 updatedAt 日期，若当日已拉取过则自动跳过（始终生效），
-// 因此同日内重复运行 sync 几乎不消耗 credits，仅跨天或删库时才重拉。
+// 缓存：每条详情记录 updatedAt 日期，若当日已拉取过则自动跳过（FORCE=true 时跳过此缓存，强制重拉），
+// 因此同日内重复运行 sync 几乎不消耗 credits，仅跨天或 FORCE=true 时才重拉。
 const FETCH_DETAILS = process.env.FETCH_DETAILS === 'true';
 
 // 海克斯强化库 / 装备库：1.0.0 版本不涉及，默认关闭以省 credits。
@@ -24,7 +24,9 @@ const FETCH_ITEMS = process.env.FETCH_ITEMS === 'true';
 
 // 是否重新同步由「版本 version」与「源数据生成日期 updatedAt(generatedAt)」共同决定：
 // 两者任一与本地存储不同即重新拉取；都相同则跳过以节省 credits（见下方 run() 判断）。
-// 真正需要无视版本强制全量重刷（如修复解析 bug 后重刷全部原始数据）：删除 data/aram.db 再 sync。
+// FORCE=true 时忽略上述版本比对与所有当日日期缓存，强制全量重新拉取（用于修复解析 bug、验证全链路等）；
+// 也可删除 data/aram.db 再 sync 实现彻底重刷。用法：FORCE=true npm run sync
+const FORCE = process.env.FORCE === 'true';
 
 // ===== 日期缓存工具 =====
 // 每次成功拉取的数据都打上 updatedAt（YYYY-MM-DD）；若 updatedAt 为当天则跳过该数据，
@@ -35,9 +37,9 @@ function todayStr() {
 function isToday(dateStr) {
   return typeof dateStr === 'string' && dateStr.slice(0, 10) === todayStr();
 }
-// 从本地库读取已存的英雄榜（用于命中当日缓存时跳过重新拉取）
+// 从本地库读取已存的英雄榜（用于命中当日缓存时跳过重新拉取）；含 raw 列以便缓存路径沿用已存原始 JSON
 function loadChampionsFromDb() {
-  return db.prepare('SELECT id,name,alias,title,icon,tier,winRate,pickRate FROM champions').all();
+  return db.prepare('SELECT id,name,alias,title,icon,tier,winRate,pickRate,raw FROM champions').all();
 }
 
 async function run() {
@@ -55,22 +57,29 @@ async function run() {
   console.log(`[sync] updatedAt  local=${lastUpdatedAt || 'none'} remote=${updatedAt}`);
 
   // 版本(version)与源数据生成日期(updatedAt/generatedAt)两者都相同 → 跳过全量拉取，省 credits；
-  // 两者任一不同（含首次运行/本地无记录）→ 跑后续同步流程。
-  if (lastVersion && lastVersion === dataVersion && lastUpdatedAt && lastUpdatedAt === updatedAt) {
+  // 两者任一不同（含首次运行/本地无记录）→ 跑后续同步流程。FORCE=true 时忽略此比对，强制跑后续流程。
+  if (!FORCE && lastVersion && lastVersion === dataVersion && lastUpdatedAt && lastUpdatedAt === updatedAt) {
     console.log('[sync] 版本与源数据生成日期均未变，跳过全量拉取（节省 credits）');
     return;
   }
+  if (FORCE) {
+    console.log('[sync] FORCE=true，强制全量重新拉取（忽略版本比对与当日日期缓存）');
+  }
 
-  // 2) 英雄榜单（命中当日缓存则跳过拉取，省 1 credit；当日跳过始终生效）
+  // 2) 英雄榜单（命中当日缓存则跳过拉取，省 1 credit；FORCE=true 时强制重拉）
   const today = todayStr();
   let champions;
+  // 第三方原始条目映射（id -> 原始对象），用于 raw 列完整保留原始数据，而非仅归一化子集
+  let champRawMap = null;
   const championsDate = getMeta('championsDate');
-  if (championsDate && isToday(championsDate)) {
-    champions = loadChampionsFromDb();
+  if (!FORCE && championsDate && isToday(championsDate)) {
+    champions = loadChampionsFromDb(); // 含 raw 列，可沿用库内已存的原始 JSON（不破坏已保留数据）
     console.log(`[sync] 英雄榜命中当日缓存（${champions.length} 条），跳过拉取`);
   } else {
     const championsRaw = await fetchThrottled('/champions.json');
-    champions = (Array.isArray(championsRaw) ? championsRaw : []).map(normalizeChampion);
+    const rawList = Array.isArray(championsRaw) ? championsRaw : [];
+    champions = rawList.map(normalizeChampion);
+    champRawMap = new Map(champions.map((c, i) => [c.id, rawList[i]]));
     console.log(`[sync] 英雄榜 ${champions.length} 条`);
   }
   setMeta('championsDate', today);
@@ -81,7 +90,10 @@ async function run() {
   `);
   const txChamp = db.transaction((list) => {
     for (const c of list) {
-      upsertChamp.run({ ...c, raw: JSON.stringify(c), updatedAt: today });
+      // 优先存第三方原始条目（完整保留）；命中当日缓存时库内已含原始 raw 则沿用，不破坏已存数据
+      const original = champRawMap ? champRawMap.get(c.id) : (c.raw || null);
+      const rawStr = original ? JSON.stringify(original) : (c.raw || '{}');
+      upsertChamp.run({ ...c, raw: rawStr, updatedAt: today });
     }
   });
   txChamp(champions);
@@ -89,7 +101,7 @@ async function run() {
   // 3) 海克斯强化库（1.0.0 暂不涉及，默认关闭；开启：FETCH_AUGMENTS=true）
   if (FETCH_AUGMENTS) {
     const augDate = getMeta('augmentsDate');
-    if (augDate && isToday(augDate)) {
+    if (!FORCE && augDate && isToday(augDate)) {
       console.log('[sync] 强化库命中当日缓存，跳过拉取');
     } else {
       const augmentsRaw = await fetchThrottled('/augments.json');
@@ -109,7 +121,7 @@ async function run() {
   // 4) 装备库（1.0.0 暂不涉及，默认关闭；开启：FETCH_ITEMS=true）
   if (FETCH_ITEMS) {
     const itemDate = getMeta('itemsDate');
-    if (itemDate && isToday(itemDate)) {
+    if (!FORCE && itemDate && isToday(itemDate)) {
       console.log('[sync] 装备库命中当日缓存，跳过拉取');
     } else {
       const itemsRaw = await fetchThrottled('/items.json');
@@ -138,9 +150,9 @@ async function run() {
     let quotaHit = false;
     for (let i = 0; i < champions.length; i++) {
       const c = champions[i];
-      // 当日已拉取过则跳过（始终生效，避免重复消耗 credits；跨天或删库才会重拉）
+      // 当日已拉取过则跳过（FORCE=true 时强制重拉；跨天或删库才会重拉）
       const row = getDetailDate.get(c.id);
-      if (row && row.updatedAt && isToday(row.updatedAt)) {
+      if (!FORCE && row && row.updatedAt && isToday(row.updatedAt)) {
         cached++;
         if ((i + 1) % 10 === 0) {
           console.log(`[sync] 英雄详情进度(含缓存) ${i + 1}/${champions.length}`);

@@ -10,12 +10,15 @@ if (keyPoolSize() === 0) {
 }
 console.log(`[sync] 已加载 ${keyPoolSize()} 个 API Key，将自动负载均衡并按剩余额度切换`);
 
-// 默认关闭英雄详情同步：单 Key 免费额度仅 200 credits/天，全量 173 英雄×2 远超额度。
-// 配置多个 Key（DTODO_API_KEYS）后额度叠加（如 2 Key=400/天），即可全量每天同步。
-// 仅在做“英雄详情页”时开启：FETCH_DETAILS=true npm run sync
-// 且只拉胜率前 DETAIL_TOP_N 名以控制成本（默认 50，约 100 credits）。
+// 英雄详情同步：拉取全部英雄详情（champions/{id}.json，全量 173 名）。
+// 全量 173 英雄×2 ≈ 346 credits，需配置多 Key（DTODO_API_KEYS）叠加额度（如 2 Key=400/天）；
+// 单 Key(200/天)不够，额度耗尽会中途停止（QUOTA_EXCEEDED）。开启：FETCH_DETAILS=true。
 const FETCH_DETAILS = process.env.FETCH_DETAILS === 'true';
-const DETAIL_TOP_N = Math.max(1, parseInt(process.env.DETAIL_TOP_N || '50', 10));
+
+// 海克斯强化库 / 装备库：1.0.0 版本不涉及，默认关闭以省 credits。
+// 需要时用 FETCH_AUGMENTS=true / FETCH_ITEMS=true 单独开启（或在 .env 设置）。
+const FETCH_AUGMENTS = process.env.FETCH_AUGMENTS === 'true';
+const FETCH_ITEMS = process.env.FETCH_ITEMS === 'true';
 
 // FORCE=true 时忽略 dataVersion 比对，强制全量重新拉取（用于修复解析 bug 后重刷数据）。
 // 用法：FORCE=true npm run sync
@@ -60,40 +63,44 @@ async function run() {
   });
   txChamp(champions);
 
-  // 3) 海克斯强化库
-  const augmentsRaw = await fetchThrottled('/augments.json');
-  const upsertAug = db.prepare('INSERT OR REPLACE INTO augments (id, payload) VALUES (?, ?)');
-  const txAug = db.transaction((list) => {
-    const arr = Array.isArray(list) ? list : (list && list.data) || [];
-    arr.forEach((a, i) => upsertAug.run(String(a.id != null ? a.id : i), JSON.stringify(a)));
-  });
-  txAug(augmentsRaw);
-  console.log('[sync] 强化库已写入');
+  // 3) 海克斯强化库（1.0.0 暂不涉及，默认关闭；开启：FETCH_AUGMENTS=true）
+  if (FETCH_AUGMENTS) {
+    const augmentsRaw = await fetchThrottled('/augments.json');
+    const upsertAug = db.prepare('INSERT OR REPLACE INTO augments (id, payload) VALUES (?, ?)');
+    const txAug = db.transaction((list) => {
+      const arr = Array.isArray(list) ? list : (list && list.data) || [];
+      arr.forEach((a, i) => upsertAug.run(String(a.id != null ? a.id : i), JSON.stringify(a)));
+    });
+    txAug(augmentsRaw);
+    console.log('[sync] 强化库已写入');
+  } else {
+    console.log('[sync] 跳过海克斯强化库（FETCH_AUGMENTS=false）');
+  }
 
-  // 4) 装备库
-  const itemsRaw = await fetchThrottled('/items.json');
-  const upsertItem = db.prepare('INSERT OR REPLACE INTO items (id, payload) VALUES (?, ?)');
-  const txItem = db.transaction((list) => {
-    const arr = Array.isArray(list) ? list : (list && list.data) || [];
-    arr.forEach((it, i) => upsertItem.run(String(it.id != null ? it.id : i), JSON.stringify(it)));
-  });
-  txItem(itemsRaw);
-  console.log('[sync] 装备库已写入');
+  // 4) 装备库（1.0.0 暂不涉及，默认关闭；开启：FETCH_ITEMS=true）
+  if (FETCH_ITEMS) {
+    const itemsRaw = await fetchThrottled('/items.json');
+    const upsertItem = db.prepare('INSERT OR REPLACE INTO items (id, payload) VALUES (?, ?)');
+    const txItem = db.transaction((list) => {
+      const arr = Array.isArray(list) ? list : (list && list.data) || [];
+      arr.forEach((it, i) => upsertItem.run(String(it.id != null ? it.id : i), JSON.stringify(it)));
+    });
+    txItem(itemsRaw);
+    console.log('[sync] 装备库已写入');
+  } else {
+    console.log('[sync] 跳过装备库（FETCH_ITEMS=false）');
+  }
 
-  // 5) 英雄详情（默认关闭，避免超额度；开启时只拉胜率前 N 名）
+  // 5) 英雄详情（全量拉取，不再按胜率截取前 N 名）
   if (FETCH_DETAILS) {
     const upsertDetail = db.prepare(
       'INSERT OR REPLACE INTO champion_detail (id, payload, updatedAt) VALUES (?, ?, ?)'
     );
     const now = new Date().toISOString();
-    const topChampions = champions
-      .slice()
-      .sort((a, b) => b.winRate - a.winRate)
-      .slice(0, DETAIL_TOP_N);
     let ok = 0;
     let quotaHit = false;
-    for (let i = 0; i < topChampions.length; i++) {
-      const c = topChampions[i];
+    for (let i = 0; i < champions.length; i++) {
+      const c = champions[i];
       try {
         const detail = await fetchThrottled(`/champions/${c.id}.json`);
         upsertDetail.run(c.id, JSON.stringify(detail), now);
@@ -107,10 +114,10 @@ async function run() {
         console.warn(`[sync] 英雄 ${c.id} 详情失败: ${e.message}`);
       }
       if ((i + 1) % 10 === 0) {
-        console.log(`[sync] 英雄详情进度 ${i + 1}/${topChampions.length}`);
+        console.log(`[sync] 英雄详情进度 ${i + 1}/${champions.length}`);
       }
     }
-    console.log(`[sync] 英雄详情 ${ok}/${topChampions.length} 条${quotaHit ? '（额度耗尽提前结束）' : ''}`);
+    console.log(`[sync] 英雄详情 ${ok}/${champions.length} 条${quotaHit ? '（额度耗尽提前结束）' : ''}`);
   } else {
     console.log('[sync] 跳过英雄详情（默认关闭，开启：FETCH_DETAILS=true）');
   }

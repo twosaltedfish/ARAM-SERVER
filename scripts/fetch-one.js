@@ -22,9 +22,12 @@ require('dotenv').config();
 
 const { BASE, normalizeChampionDetail } = require('../lib/dtodo');
 
-const API_KEY = process.env.DTODO_API_KEY;
-if (!API_KEY || API_KEY === 'your_api_key_here') {
-  console.error('❌ 缺少 DTODO_API_KEY，请在 backend/.env 中填写真实 Key');
+const API_KEY = (process.env.DTODO_API_KEYS || process.env.DTODO_API_KEY || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter((s) => s && s !== 'your_api_key_here')[0];
+if (!API_KEY) {
+  console.error('❌ 缺少 API Key，请在 backend/.env 配置 DTODO_API_KEYS=key1,key2 或 DTODO_API_KEY');
   process.exit(1);
 }
 

@@ -2,15 +2,16 @@
 
 require('dotenv').config();
 const { db, getMeta, setMeta } = require('./db');
-const { fetchThrottled, normalizeChampion } = require('./lib/dtodo');
+const { fetchThrottled, normalizeChampion, keyPoolSize } = require('./lib/dtodo');
 
-const API_KEY = process.env.DTODO_API_KEY;
-if (!API_KEY || API_KEY === 'your_api_key_here') {
-  console.error('缺少 DTODO_API_KEY，请在 .env 中填写真实 Key');
+if (keyPoolSize() === 0) {
+  console.error('缺少 API Key：请在 .env 配置 DTODO_API_KEYS=key1,key2（或兼容单 Key 的 DTODO_API_KEY）');
   process.exit(1);
 }
+console.log(`[sync] 已加载 ${keyPoolSize()} 个 API Key，将自动负载均衡并按剩余额度切换`);
 
-// 默认关闭英雄详情同步：免费额度仅 200 credits/天，全量 173 英雄×2 远超额度。
+// 默认关闭英雄详情同步：单 Key 免费额度仅 200 credits/天，全量 173 英雄×2 远超额度。
+// 配置多个 Key（DTODO_API_KEYS）后额度叠加（如 2 Key=400/天），即可全量每天同步。
 // 仅在做“英雄详情页”时开启：FETCH_DETAILS=true npm run sync
 // 且只拉胜率前 DETAIL_TOP_N 名以控制成本（默认 50，约 100 credits）。
 const FETCH_DETAILS = process.env.FETCH_DETAILS === 'true';
@@ -24,7 +25,7 @@ async function run() {
   console.log('[sync] 开始拉取数据...');
 
   // 1) config.json（免费、不消耗 credits）——拿到版本与 dataVersion 作为缓存键
-  const config = await fetchThrottled('/config.json', { apiKey: API_KEY });
+  const config = await fetchThrottled('/config.json');
   const version = config.gamePatch || config.version || '';
   const updatedAt = config.generatedAt || '';
   const dataVersion = config.dataVersion || '';
@@ -44,7 +45,7 @@ async function run() {
   }
 
   // 2) 英雄榜单
-  const championsRaw = await fetchThrottled('/champions.json', { apiKey: API_KEY });
+  const championsRaw = await fetchThrottled('/champions.json');
   const champions = (Array.isArray(championsRaw) ? championsRaw : []).map(normalizeChampion);
   console.log(`[sync] 英雄榜 ${champions.length} 条`);
 
@@ -60,7 +61,7 @@ async function run() {
   txChamp(champions);
 
   // 3) 海克斯强化库
-  const augmentsRaw = await fetchThrottled('/augments.json', { apiKey: API_KEY });
+  const augmentsRaw = await fetchThrottled('/augments.json');
   const upsertAug = db.prepare('INSERT OR REPLACE INTO augments (id, payload) VALUES (?, ?)');
   const txAug = db.transaction((list) => {
     const arr = Array.isArray(list) ? list : (list && list.data) || [];
@@ -70,7 +71,7 @@ async function run() {
   console.log('[sync] 强化库已写入');
 
   // 4) 装备库
-  const itemsRaw = await fetchThrottled('/items.json', { apiKey: API_KEY });
+  const itemsRaw = await fetchThrottled('/items.json');
   const upsertItem = db.prepare('INSERT OR REPLACE INTO items (id, payload) VALUES (?, ?)');
   const txItem = db.transaction((list) => {
     const arr = Array.isArray(list) ? list : (list && list.data) || [];
@@ -94,7 +95,7 @@ async function run() {
     for (let i = 0; i < topChampions.length; i++) {
       const c = topChampions[i];
       try {
-        const detail = await fetchThrottled(`/champions/${c.id}.json`, { apiKey: API_KEY });
+        const detail = await fetchThrottled(`/champions/${c.id}.json`);
         upsertDetail.run(c.id, JSON.stringify(detail), now);
         ok++;
       } catch (e) {

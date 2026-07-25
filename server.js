@@ -67,6 +67,28 @@ app.get('/api/champions', (req, res) => {
   }
 });
 
+// 英雄榜源数据（原始 raw）：查看缓存下来的第三方原始 JSON，用于核对字段/调试。
+// 区别于 /api/champions（归一化子集），这里返回入库时原样保存的 champions.raw。
+app.get('/api/champions-raw', (req, res) => {
+  try {
+    const rows = db
+      .prepare('SELECT id, name, updatedAt, raw FROM champions ORDER BY id')
+      .all();
+    const champions = rows.map((r) => {
+      let raw = null;
+      try {
+        raw = r.raw ? JSON.parse(r.raw) : null;
+      } catch (e) {
+        raw = { __parseError: String(e), __rawText: r.raw };
+      }
+      return { id: r.id, name: r.name, updatedAt: r.updatedAt, raw };
+    });
+    res.json({ source: sourceMeta(), count: champions.length, champions });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
 // 单英雄详情：归一化成小程序详情页所需结构后返回。
 // 需每日拉取时开启 FETCH_DETAILS=true（默认关闭，省 credits）。未同步返回 404。
 app.get('/api/champions/:id', (req, res) => {

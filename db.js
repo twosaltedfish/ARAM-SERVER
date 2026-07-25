@@ -50,6 +50,15 @@ CREATE TABLE IF NOT EXISTS items (
 );
 `);
 
+// 兼容旧库：为已存在的表补充 updatedAt 列（champion_detail 在建表时已含；其余三表按需补）
+for (const t of ['champions', 'augments', 'items']) {
+  try {
+    db.exec(`ALTER TABLE ${t} ADD COLUMN updatedAt TEXT`);
+  } catch (_) {
+    /* 列已存在则忽略 */
+  }
+}
+
 function getMeta(key) {
   const row = db.prepare('SELECT value FROM meta WHERE key = ?').get(key);
   return row ? row.value : null;

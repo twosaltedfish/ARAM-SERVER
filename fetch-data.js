@@ -13,8 +13,8 @@ console.log(`[sync] 已加载 ${keyPoolSize()} 个 API Key，将自动负载均�
 // 英雄详情同步：拉取全部英雄详情（champions/{id}.json，全量 173 名）。
 // 全量 173 英雄×2 ≈ 346 credits，需配置多 Key（DTODO_API_KEYS）叠加额度（如 2 Key=400/天）；
 // 单 Key(200/天)不够，额度耗尽会中途停止（QUOTA_EXCEEDED）。开启：FETCH_DETAILS=true。
-// 缓存：每条详情记录 updatedAt 日期，若当日已拉取过则自动跳过（始终生效，不随 FORCE 改变），
-// 因此同日内无论普通还是 FORCE 运行 sync 都几乎不消耗 credits，仅跨天或删库时才重拉。
+// 缓存：每条详情记录 updatedAt 日期，若当日已拉取过则自动跳过（始终生效），
+// 因此同日内重复运行 sync 几乎不消耗 credits，仅跨天或删库时才重拉。
 const FETCH_DETAILS = process.env.FETCH_DETAILS === 'true';
 
 // 海克斯强化库 / 装备库：1.0.0 版本不涉及，默认关闭以省 credits。
@@ -22,16 +22,13 @@ const FETCH_DETAILS = process.env.FETCH_DETAILS === 'true';
 const FETCH_AUGMENTS = process.env.FETCH_AUGMENTS === 'true';
 const FETCH_ITEMS = process.env.FETCH_ITEMS === 'true';
 
-// FORCE=true 时忽略 dataVersion 整批比对、强制重跑整条流水线（用于上游 dataVersion 未变
-// 但你改了同步/解析代码想验证全链路时）。注意：FORCE 不影响“当日已拉取的条目自动跳过”
-// 这一信用节省逻辑——当日已拉过的数据仍会跳过（顺带支持失败断点续拉）。
-// 真正需要全量重拉（如修复解析 bug 后重刷全部原始数据）：删除 data/aram.db 再 sync。
-// 用法：FORCE=true npm run sync
-const FORCE = process.env.FORCE === 'true';
+// 是否重新同步由「版本 version」与「源数据生成日期 updatedAt(generatedAt)」共同决定：
+// 两者任一与本地存储不同即重新拉取；都相同则跳过以节省 credits（见下方 run() 判断）。
+// 真正需要无视版本强制全量重刷（如修复解析 bug 后重刷全部原始数据）：删除 data/aram.db 再 sync。
 
 // ===== 日期缓存工具 =====
 // 每次成功拉取的数据都打上 updatedAt（YYYY-MM-DD）；若 updatedAt 为当天则跳过该数据，
-// 避免同日内重复消耗 credits。此跳过始终生效（不受 FORCE 影响）。
+// 避免同日内重复消耗 credits。此跳过始终生效。
 function todayStr() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -53,20 +50,18 @@ async function run() {
   const dataVersion = config.dataVersion || '';
 
   const lastVersion = getMeta('dataVersion');
+  const lastUpdatedAt = getMeta('updatedAt');
   console.log(`[sync] dataVersion local=${lastVersion || 'none'} remote=${dataVersion}`);
+  console.log(`[sync] updatedAt  local=${lastUpdatedAt || 'none'} remote=${updatedAt}`);
 
-  // 数据未变更则跳过全量拉取，省 credits（FORCE=true 时强制重拉，用于修复解析 bug 后重刷）
-  if (!FORCE && lastVersion && lastVersion === dataVersion) {
-    console.log('[sync] 数据未变更，跳过全量拉取（节省 credits）');
-    setMeta('version', version);
-    setMeta('updatedAt', updatedAt);
+  // 版本(version)与源数据生成日期(updatedAt/generatedAt)两者都相同 → 跳过全量拉取，省 credits；
+  // 两者任一不同（含首次运行/本地无记录）→ 跑后续同步流程。
+  if (lastVersion && lastVersion === dataVersion && lastUpdatedAt && lastUpdatedAt === updatedAt) {
+    console.log('[sync] 版本与源数据生成日期均未变，跳过全量拉取（节省 credits）');
     return;
   }
-  if (FORCE) {
-    console.log('[sync] FORCE=true，强制全量重新拉取');
-  }
 
-  // 2) 英雄榜单（命中当日缓存则跳过拉取，省 1 credit；当日跳过始终生效，不受 FORCE 影响）
+  // 2) 英雄榜单（命中当日缓存则跳过拉取，省 1 credit；当日跳过始终生效）
   const today = todayStr();
   let champions;
   const championsDate = getMeta('championsDate');

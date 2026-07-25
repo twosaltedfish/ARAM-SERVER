@@ -2,6 +2,8 @@
 
 require('dotenv').config();
 const express = require('express');
+const fs = require('fs');
+const path = require('path');
 const { db, getMeta } = require('./db');
 const { normalizeChampionDetail } = require('./lib/dtodo');
 
@@ -28,6 +30,20 @@ function sourceMeta() {
 
 app.get('/health', (req, res) => {
   res.json({ ok: true, time: Date.now() });
+});
+
+// 同步状态：读取 sync-daily.sh 写入的 data/sync-status.json，便于远程查看上次同步成败与报错原因
+const SYNC_STATUS_FILE = path.join(__dirname, 'data', 'sync-status.json');
+app.get('/api/sync-status', (req, res) => {
+  try {
+    if (fs.existsSync(SYNC_STATUS_FILE)) {
+      res.json(JSON.parse(fs.readFileSync(SYNC_STATUS_FILE, 'utf8')));
+    } else {
+      res.json({ lastRun: '', ok: null, error: '尚无同步记录（尚未跑过 sync-daily.sh）' });
+    }
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
 });
 
 // 英雄强度榜：按胜率降序，字段对齐小程序 utils/champions.js 的 mock 结构

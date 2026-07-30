@@ -75,12 +75,11 @@ app.get('/api/champions', (req, res) => {
       .all();
     const champions = rows.map((r) => {
       const custom = customAliasMap[r.id] || [];
-      const aliasField = [r.alias, ...custom].filter(Boolean).join(',');
       return {
         id: r.id,
         name: r.name,
-        alias: aliasField,
-        aliases: custom, // 自定义别名数组（调试/未来使用，不影响搜索）
+        alias: r.alias, // 仅展示数据源原始别名，避免页面堆一堆别名
+        aliases: custom, // 自定义别名数组，前端搜索时与 alias 一起匹配
         title: r.title,
         iconUrl: r.icon,
         tier: r.tier,

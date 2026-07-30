@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>英雄自定义别名管理</title>
+<meta name="robots" content="noindex" />
+<style>
+  :root { --bg:#f7f8fa; --card:#fff; --line:#e6e8eb; --text:#1f2329; --sub:#8a9099;
+          --brand:#2563eb; --brand-d:#1d4ed8; --danger:#dc2626; --chip:#eef2ff; --chip-t:#3730a3; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif; }
+  header { position:sticky; top:0; background:rgba(255,255,255,.92); backdrop-filter:blur(6px);
+           border-bottom:1px solid var(--line); padding:14px 18px; z-index:10; }
+  h1 { font-size:18px; margin:0 0 10px; }
+  .token-row { display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap; }
+  .token-row input { flex:1; min-width:220px; }
+  #search { width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:10px; font-size:15px; }
+  input { padding:8px 10px; border:1px solid var(--line); border-radius:8px; font-size:14px; outline:none; }
+  input:focus { border-color:var(--brand); }
+  button { cursor:pointer; border:none; border-radius:8px; padding:8px 14px; font-size:14px;
+           background:var(--brand); color:#fff; transition:.15s; }
+  button:hover { background:var(--brand-d); }
+  button.ghost { background:#fff; color:var(--text); border:1px solid var(--line); }
+  main { max-width:860px; margin:16px auto; padding:0 12px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; margin-bottom:10px; overflow:hidden; }
+  .head { display:flex; align-items:center; gap:10px; padding:12px 14px; cursor:pointer; }
+  .head .name { font-weight:600; }
+  .head .title { color:var(--sub); font-size:13px; }
+  .head .alias { margin-left:auto; color:var(--sub); font-size:12px; text-align:right;
+                 max-width:46%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .body { border-top:1px solid var(--line); padding:12px 14px; background:#fafbfc; }
+  .chips { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px; }
+  .chip { background:var(--chip); color:var(--chip-t); border-radius:999px; padding:5px 10px;
+          font-size:13px; display:inline-flex; align-items:center; gap:6px; }
+  .chip button { background:none; color:var(--chip-t); padding:0 2px; font-size:15px; line-height:1; }
+  .chip button:hover { color:var(--danger); background:none; }
+  .chip button.edit:hover { color:var(--brand); }
+  .chip button.save { color:#16a34a; }
+  .chip button.save:hover { color:#15803d; background:none; }
+  .chip.editing { background:#fff; border:1px solid var(--line); }
+  .chip .editinput { border:none; background:transparent; padding:0; width:96px; font-size:13px; outline:none; }
+  .add { display:flex; gap:8px; }
+  .add input { flex:1; }
+  .muted { color:var(--sub); font-size:13px; }
+  .hint { color:var(--sub); font-size:12px; margin:6px 2px 0; }
+  .toast { position:fixed; left:50%; bottom:28px; transform:translateX(-50%); background:#1f2329; color:#fff;
+           padding:10px 16px; border-radius:10px; font-size:14px; opacity:0; transition:.25s; pointer-events:none; }
+  .toast.show { opacity:1; }
+</style>
+</head>
+<body>
+<header>
+  <h1>英雄自定义别名管理</h1>
+  <div class="token-row">
+    <input id="token" placeholder="管理令牌（可选；若服务器设了 ADMIN_TOKEN 则必填）" />
+    <button id="saveToken" class="ghost">保存令牌</button>
+  </div>
+  <input id="search" placeholder="搜索英雄名 / 别名 / 称号（回车或输入即过滤）" />
+</header>
+<main id="list">
+  <p class="muted" style="text-align:center;margin-top:40px">加载中…</p>
+</main>
+<div class="toast" id="toast"></div>
+
+<script>
+  const API = '/api';
+  let token = localStorage.getItem('admin_token') || '';
+  let champions = [];
+  // id -> { loaded:bool, list:[{id, alias}], error?:string }
+  const aliasMap = {};
+  const expanded = new Set();
+  let editingAid = null;       // 正在编辑的别名 id（同一时刻仅一个）
+
+  const $ = (s) => document.querySelector(s);
+
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+      .replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/'/g, '&#39;');
+  }
+  function toast(msg) {
+    const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+    clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove('show'), 2200);
+  }
+  function headers() {
+    const h = { 'Content-Type': 'application/json' };
+    if (token) h['x-admin-token'] = token;
+    return h;
+  }
+
+  async function load() {
+    try {
+      const res = await fetch(API + '/champions');
+      const data = await res.json();
+      champions = data.champions || [];
+      render();
+    } catch (e) {
+      $('#list').innerHTML = '<p class="muted" style="text-align:center;margin-top:40px">加载失败：' + esc(e.message) + '</p>';
+    }
+  }
+
+  // 展开时懒加载该英雄的自定义别名（带 id，供精确修改/删除）
+  async function ensureAliases(id) {
+    if (aliasMap[id] && aliasMap[id].loaded) return;
+    aliasMap[id] = { loaded: false, list: [] };
+    try {
+      const res = await fetch(API + '/champions/' + encodeURIComponent(id) + '/aliases');
+      const data = await res.json();
+      aliasMap[id] = { loaded: true, list: data.aliases || [] };
+    } catch (e) {
+      aliasMap[id] = { loaded: true, list: [], error: e.message };
+    }
+  }
+
+  function render() {
+    const kw = $('#search').value.trim().toLowerCase();
+    const list = $('#list');
+    const filtered = champions.filter((c) => {
+      if (!kw) return true;
+      return (c.name || '').toLowerCase().includes(kw) ||
+             (c.alias || '').toLowerCase().includes(kw) ||
+             (c.title || '').toLowerCase().includes(kw);
+    });
+    if (!filtered.length) { list.innerHTML = '<p class="muted" style="text-align:center;margin-top:40px">无匹配英雄</p>'; return; }
+    list.innerHTML = filtered.map((c) => {
+      const open = expanded.has(c.id);
+      const am = aliasMap[c.id];
+      let chips = '';
+      if (open) {
+        if (!am || !am.loaded) chips = '<span class="muted">加载中…</span>';
+        else if (am.error) chips = '<span class="muted">加载失败：' + esc(am.error) + '</span>';
+        else if (!am.list.length) chips = '<span class="muted">暂无自定义别名，可在下方添加</span>';
+        else chips = am.list.map((a) => {
+          if (Number(editingAid) === Number(a.id)) {
+            return '<span class="chip editing" data-aid="' + esc(a.id) + '">' +
+              '<input class="editinput" data-aid="' + esc(a.id) + '" value="' + esc(a.alias) + '" />' +
+              '<button class="save" data-id="' + esc(c.id) + '" data-aid="' + esc(a.id) + '" title="保存">✓</button>' +
+              '<button class="cancel" data-aid="' + esc(a.id) + '" title="取消">×</button>' +
+            '</span>';
+          }
+          return '<span class="chip">' + esc(a.alias) +
+            '<button class="edit" data-id="' + esc(c.id) + '" data-aid="' + esc(a.id) + '" title="修改">✎</button>' +
+            '<button class="del" data-id="' + esc(c.id) + '" data-aid="' + esc(a.id) + '" title="删除">×</button>' +
+          '</span>';
+        }).join('');
+      }
+      return '<div class="card">' +
+        '<div class="head" data-id="' + esc(c.id) + '">' +
+          '<span class="name">' + esc(c.name) + '</span>' +
+          '<span class="title">' + esc(c.title) + '</span>' +
+          '<span class="alias">' + esc(c.alias) + '</span>' +
+        '</div>' +
+        (open ? '<div class="body">' +
+          '<div class="chips">' + chips + '</div>' +
+          '<div class="add">' +
+            '<input class="addinput" id="add-' + esc(c.id) + '" data-id="' + esc(c.id) +
+              '" placeholder="多个用逗号或空格分隔，如：压缩, 风男, 托儿索" />' +
+            '<button class="addbtn" data-id="' + esc(c.id) + '">添加</button>' +
+          '</div>' +
+          '<p class="hint">支持多个自定义别名；修改 / 删除只维护自定义别名，不影响第三方原始数据，小程序按别名即可搜索命中。</p>' +
+        '</div>' : '') +
+      '</div>';
+    }).join('');
+  }
+
+  async function toggle(id) {
+    if (expanded.has(id)) { expanded.delete(id); render(); }
+    else { expanded.add(id); await ensureAliases(id); render(); }
+  }
+
+  async function addAlias(id) {
+    const inp = $('#add-' + id);
+    const raw = inp.value.trim();
+    if (!raw) return;
+    const list = [...new Set(raw.split(/[,，\s]+/).map((s) => s.trim()).filter(Boolean))];
+    if (!list.length) return;
+    try {
+      const res = await fetch(API + '/champions/' + encodeURIComponent(id) + '/aliases', {
+        method: 'POST', headers: headers(), body: JSON.stringify({ aliases: list }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+      aliasMap[id] = { loaded: true, list: data.aliases || [] };
+      inp.value = '';
+      render();
+      toast('已添加 ' + (data.added || list.length) + ' 个别名' +
+        (data.skipped ? '（跳过 ' + data.skipped + ' 个重复）' : ''));
+    } catch (e) { toast('添加失败：' + e.message); }
+  }
+
+  async function editAlias(id, aid, newText) {
+    const alias = newText.trim();
+    if (!alias) { editingAid = null; render(); return; }
+    try {
+      const res = await fetch(API + '/champions/' + encodeURIComponent(id) + '/aliases/' + encodeURIComponent(aid), {
+        method: 'PUT', headers: headers(), body: JSON.stringify({ alias }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+      if (aliasMap[id]) {
+        const it = aliasMap[id].list.find((x) => Number(x.id) === Number(aid));
+        if (it) it.alias = alias;
+      }
+      editingAid = null;
+      render();
+      toast('已修改');
+    } catch (e) { toast('修改失败：' + e.message); editingAid = null; render(); }
+  }
+
+  async function delAlias(id, aid) {
+    try {
+      const res = await fetch(API + '/champions/' + encodeURIComponent(id) + '/aliases/' + encodeURIComponent(aid), {
+        method: 'DELETE', headers: headers(),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+      aliasMap[id] = { loaded: true, list: data.aliases || [] };
+      render();
+      toast('已删除');
+    } catch (e) { toast('删除失败：' + e.message); }
+  }
+
+  // 事件委托
+  $('#list').addEventListener('click', (e) => {
+    const edit = e.target.closest('.edit');
+    if (edit) { editingAid = Number(edit.dataset.aid); render(); return; }
+    const del = e.target.closest('.del');
+    if (del) { delAlias(del.dataset.id, del.dataset.aid); return; }
+    const save = e.target.closest('.save');
+    if (save) {
+      const chip = save.closest('.chip');
+      const inp = chip && chip.querySelector('.editinput');
+      editAlias(save.dataset.id, save.dataset.aid, inp ? inp.value : '');
+      return;
+    }
+    const cancel = e.target.closest('.cancel');
+    if (cancel) { editingAid = null; render(); return; }
+    const addbtn = e.target.closest('.addbtn');
+    if (addbtn) { addAlias(addbtn.dataset.id); return; }
+    const head = e.target.closest('.head');
+    if (head) { toggle(head.dataset.id); }
+  });
+  // 输入框回车：添加框 -> 添加；编辑框 -> 保存
+  $('#list').addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    if (e.target.classList.contains('addinput')) addAlias(e.target.dataset.id);
+    else if (e.target.classList.contains('editinput')) {
+      const chip = e.target.closest('.chip');
+      const save = chip && chip.querySelector('.save');
+      if (save) editAlias(save.dataset.id, save.dataset.aid, e.target.value);
+    }
+  });
+  $('#search').addEventListener('input', render);
+  $('#saveToken').addEventListener('click', () => {
+    token = $('#token').value.trim();
+    localStorage.setItem('admin_token', token);
+    toast(token ? '令牌已保存' : '已清除令牌');
+  });
+
+  // 初始化：回填已存令牌
+  if (token) $('#token').value = token;
+  load();
+</script>
+</body>
+</html>

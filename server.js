@@ -13,11 +13,26 @@ const PORT = process.env.PORT || 3000;
 // 个人项目，开放 CORS 便于本地/浏览器调试；生产可改为指定域名
 app.use((req, res, next) => {
   res.set('Access-Control-Allow-Origin', '*');
-  res.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.set('Access-Control-Allow-Headers', 'Content-Type');
+  res.set('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type, x-admin-token');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
+
+// 解析 JSON 请求体（POST/DELETE 添加别名时使用）
+app.use(express.json());
+
+// 可选管理员鉴权：仅当配置了 ADMIN_TOKEN 环境变量时才校验，
+// 调用写接口需带请求头 x-admin-token 或查询参数 ?token=...；未配置则放行（个人项目便捷）。
+function requireAdmin(req, res, next) {
+  const token = process.env.ADMIN_TOKEN;
+  if (!token) return next();
+  const provided = req.get('x-admin-token') || (req.query && req.query.token);
+  if (provided !== token) {
+    return res.status(401).json({ error: '未授权：需 x-admin-token 请求头（或 ?token=）' });
+  }
+  next();
+}
 
 function sourceMeta() {
   return {
@@ -46,21 +61,32 @@ app.get('/api/sync-status', (req, res) => {
   }
 });
 
-// 英雄强度榜：按胜率降序，字段对齐小程序 utils/champions.js 的 mock 结构
+// 英雄强度榜：按胜率降序；把用户自定义别名合并进 alias 字段，使前端按 alias 搜索可命中。
 app.get('/api/champions', (req, res) => {
   try {
+    // 读取全部自定义别名，构造 champion_id -> [alias,...] 映射
+    const aliasRows = db.prepare('SELECT champion_id, alias FROM champion_aliases').all();
+    const customAliasMap = {};
+    for (const r of aliasRows) {
+      (customAliasMap[r.champion_id] || (customAliasMap[r.champion_id] = [])).push(r.alias);
+    }
     const rows = db
       .prepare('SELECT id, name, alias, title, icon, tier, winRate FROM champions ORDER BY winRate DESC')
       .all();
-    const champions = rows.map((r) => ({
-      id: r.id,
-      name: r.name,
-      alias: r.alias,
-      title: r.title,
-      iconUrl: r.icon,
-      tier: r.tier,
-      winRate: r.winRate,
-    }));
+    const champions = rows.map((r) => {
+      const custom = customAliasMap[r.id] || [];
+      const aliasField = [r.alias, ...custom].filter(Boolean).join(',');
+      return {
+        id: r.id,
+        name: r.name,
+        alias: aliasField,
+        aliases: custom, // 自定义别名数组（调试/未来使用，不影响搜索）
+        title: r.title,
+        iconUrl: r.icon,
+        tier: r.tier,
+        winRate: r.winRate,
+      };
+    });
     res.json({ source: sourceMeta(), champions });
   } catch (e) {
     res.status(500).json({ error: String(e) });
@@ -84,6 +110,126 @@ app.get('/api/champions-raw', (req, res) => {
       return { id: r.id, name: r.name, updatedAt: r.updatedAt, raw };
     });
     res.json({ source: sourceMeta(), count: champions.length, champions });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+// ---- 自定义英雄别名管理（独立于 champions 表，sync 不覆盖）----
+// 查看某英雄全部自定义别名（每条带自增 id，供前端精确修改/删除）
+app.get('/api/champions/:id/aliases', (req, res) => {
+  const id = String(req.params.id);
+  try {
+    const rows = db
+      .prepare('SELECT id, alias, created_at FROM champion_aliases WHERE champion_id = ? ORDER BY id')
+      .all(id)
+      .map((r) => ({ id: r.id, alias: r.alias, createdAt: r.created_at }));
+    res.json({ id, aliases: rows });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+// 添加别名：body { "alias": "压缩" } 或 { "aliases": ["压缩","风男"] }
+app.post('/api/champions/:id/aliases', requireAdmin, (req, res) => {
+  const id = String(req.params.id);
+  const body = req.body || {};
+  const incoming = Array.isArray(body.aliases)
+    ? body.aliases
+    : body.alias != null
+    ? [body.alias]
+    : null;
+  if (!Array.isArray(incoming)) {
+    return res.status(400).json({ error: '请提供 alias（字符串）或 aliases（数组）' });
+  }
+  const list = [...new Set(incoming.map((s) => String(s).trim()).filter(Boolean))];
+  if (list.length === 0) return res.status(400).json({ error: '别名不能为空' });
+  const insert = db.prepare('INSERT OR IGNORE INTO champion_aliases (champion_id, alias) VALUES (?, ?)');
+  let inserted = 0;
+  const tx = db.transaction((items) => {
+    for (const a of items) inserted += insert.run(id, a).changes;
+  });
+  try {
+    tx(list);
+    const all = db
+      .prepare('SELECT id, alias, created_at FROM champion_aliases WHERE champion_id = ? ORDER BY id')
+      .all(id)
+      .map((r) => ({ id: r.id, alias: r.alias, createdAt: r.created_at }));
+    res.json({ id, aliases: all, added: inserted, skipped: list.length - inserted });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+// 修改（重命名）某条别名：PUT /api/champions/:id/aliases/:aliasId  body { "alias": "新名字" }
+app.put('/api/champions/:id/aliases/:aliasId', requireAdmin, (req, res) => {
+  const id = String(req.params.id);
+  const aliasId = Number(req.params.aliasId);
+  const body = req.body || {};
+  const newAlias = typeof body.alias === 'string' ? body.alias.trim() : '';
+  if (!newAlias) return res.status(400).json({ error: '请提供 alias（新别名文本）' });
+  try {
+    const existing = db
+      .prepare('SELECT id, alias FROM champion_aliases WHERE champion_id = ? AND id = ?')
+      .get(id, aliasId);
+    if (!existing) return res.status(404).json({ error: '未找到该别名' });
+    if (existing.alias === newAlias) return res.json({ id, aliasId, alias: newAlias, changed: false });
+    const clash = db
+      .prepare('SELECT id FROM champion_aliases WHERE champion_id = ? AND alias = ?')
+      .get(id, newAlias);
+    if (clash) return res.status(409).json({ error: '该英雄已存在同名别名' });
+    db.prepare('UPDATE champion_aliases SET alias = ? WHERE champion_id = ? AND id = ?')
+      .run(newAlias, id, aliasId);
+    res.json({ id, aliasId, alias: newAlias, changed: true });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+// 删除某条别名（按 id 精确定位）：DELETE /api/champions/:id/aliases/:aliasId
+app.delete('/api/champions/:id/aliases/:aliasId', requireAdmin, (req, res) => {
+  const id = String(req.params.id);
+  const aliasId = Number(req.params.aliasId);
+  try {
+    const info = db.prepare('DELETE FROM champion_aliases WHERE champion_id = ? AND id = ?').run(id, aliasId);
+    const all = db
+      .prepare('SELECT id, alias, created_at FROM champion_aliases WHERE champion_id = ? ORDER BY id')
+      .all(id)
+      .map((r) => ({ id: r.id, alias: r.alias, createdAt: r.created_at }));
+    res.json({ id, aliases: all, removed: info.changes });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+// 删除别名：body { "alias": "压缩" } / { "aliases": [...] } 删指定；{ "clear": true } 清空该英雄全部
+app.delete('/api/champions/:id/aliases', requireAdmin, (req, res) => {
+  const id = String(req.params.id);
+  const body = req.body || {};
+  if (body.clear) {
+    const info = db.prepare('DELETE FROM champion_aliases WHERE champion_id = ?').run(id);
+    return res.json({ id, cleared: info.changes, aliases: [] });
+  }
+  const incoming = Array.isArray(body.aliases)
+    ? body.aliases
+    : body.alias != null
+    ? [body.alias]
+    : null;
+  if (!Array.isArray(incoming)) {
+    return res.status(400).json({ error: '请提供 alias（字符串）或 aliases（数组）；或 clear:true 清空' });
+  }
+  const list = [...new Set(incoming.map((s) => String(s).trim()).filter(Boolean))];
+  const del = db.prepare('DELETE FROM champion_aliases WHERE champion_id = ? AND alias = ?');
+  const tx = db.transaction((items) => {
+    for (const a of items) del.run(id, a);
+  });
+  try {
+    tx(list);
+    const all = db
+      .prepare('SELECT id, alias, created_at FROM champion_aliases WHERE champion_id = ? ORDER BY id')
+      .all(id)
+      .map((r) => ({ id: r.id, alias: r.alias, createdAt: r.created_at }));
+    res.json({ id, aliases: all, removed: list.length });
   } catch (e) {
     res.status(500).json({ error: String(e) });
   }

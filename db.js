@@ -48,6 +48,16 @@ CREATE TABLE IF NOT EXISTS items (
   id      TEXT PRIMARY KEY,
   payload TEXT
 );
+
+-- 用户自定义英雄别名：独立于 champions 表，sync 重刷不会覆盖。
+-- champion_id 对应 champions.id（TEXT），alias 为自定义别名。
+CREATE TABLE IF NOT EXISTS champion_aliases (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  champion_id TEXT NOT NULL,
+  alias       TEXT NOT NULL,
+  created_at  TEXT DEFAULT (datetime('now')),
+  UNIQUE(champion_id, alias)
+);
 `);
 
 // 兼容旧库：为已存在的表补充 updatedAt 列（champion_detail 在建表时已含；其余三表按需补）

@@ -87,8 +87,8 @@ async function run() {
   if (champions && champions.length) {
     for (const c of champions) {
       if (c && typeof c.name === 'string') {
-        c.pinyin = pinyin(c.name, { toneType: 'none' }).join('');
-        c.pinyinInitials = pinyin(c.name, { pattern: 'first', toneType: 'none' }).join('');
+        c.pinyin = pinyin(c.name, { toneType: 'none' });
+        c.pinyinInitials = pinyin(c.name, { pattern: 'first', toneType: 'none' });
       }
     }
   }

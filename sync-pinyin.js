@@ -22,8 +22,8 @@ const update = db.prepare('UPDATE champions SET pinyin = ?, pinyin_initials = ? 
 const tx = db.transaction((list) => {
   for (const c of list) {
     if (!c || typeof c.name !== 'string') return;
-    const py = pinyin(c.name, { toneType: 'none' }).join('');
-    const initials = pinyin(c.name, { pattern: 'first', toneType: 'none' }).join('');
+    const py = pinyin(c.name, { toneType: 'none' });
+    const initials = pinyin(c.name, { pattern: 'first', toneType: 'none' });
     update.run(py, initials, c.id);
   }
 });

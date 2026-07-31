@@ -58,6 +58,7 @@
     <button id="saveToken" class="ghost">保存令牌</button>
   </div>
   <input id="search" placeholder="搜索英雄名 / 别名 / 称号（回车或输入即过滤）" />
+  <span id="search-clear" class="search-clear-btn" title="清除" style="position:absolute; right:14px; top:50%; transform:translateY(-50%); cursor:pointer; color:#999; font-size:18px; line-height:1; user-select:none;">×</span>
 </header>
 <main id="list">
   <p class="muted" style="text-align:center;margin-top:40px">加载中…</p>
@@ -116,14 +117,15 @@
 
   function render() {
     const kw = $('#search').value.trim().toLowerCase();
+    const kwNorm = kw.replace(/['\s]/g, ''); // 去掉撇号与空格，兼容 se'ti 与 seti
     const list = $('#list');
     const filtered = champions.filter((c) => {
       if (!kw) return true;
       return (c.name || '').toLowerCase().includes(kw) ||
              (c.alias || '').toLowerCase().includes(kw) ||
              (c.aliases || []).join(',').toLowerCase().includes(kw) ||
-             (c.pinyin || '').toLowerCase().includes(kw) ||
-             (c.pinyinInitials || '').toLowerCase().includes(kw) ||
+             (c.pinyin || '' && (c.pinyin.toLowerCase().includes(kw) || c.pinyin.toLowerCase().includes(kwNorm))) ||
+             (c.pinyinInitials || '' && (c.pinyinInitials.toLowerCase().includes(kw) || c.pinyinInitials.toLowerCase().includes(kwNorm))) ||
              (c.title || '').toLowerCase().includes(kw);
     });
     if (!filtered.length) { list.innerHTML = '<p class="muted" style="text-align:center;margin-top:40px">无匹配英雄</p>'; return; }
@@ -167,6 +169,12 @@
       '</div>';
     }).join('');
   }
+
+  // 清除按钮：点击即清空搜索框并重新渲染
+  document.getElementById('search-clear').addEventListener('click', () => {
+    document.getElementById('search').value = ''
+    render()
+  })
 
   async function toggle(id) {
     if (expanded.has(id)) { expanded.delete(id); render(); }

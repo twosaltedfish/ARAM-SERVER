@@ -40,7 +40,7 @@ function isToday(dateStr) {
 }
 // 从本地库读取已存的英雄榜（用于命中当日缓存时跳过重新拉取）；含 raw 列以便缓存路径沿用已存原始 JSON
 function loadChampionsFromDb() {
-  return db.prepare('SELECT id,name,alias,title,icon,tier,winRate,pickRate,raw,pinyin,pinyinInitials FROM champions').all();
+  return db.prepare('SELECT id,name,alias,title,icon,tier,winRate,pickRate,raw,pinyin,pinyin_initials FROM champions').all();
 }
 
 async function run() {
@@ -95,7 +95,7 @@ async function run() {
   setMeta('championsDate', today);
 
   const upsertChamp = db.prepare(`
-    INSERT OR REPLACE INTO champions (id, name, alias, title, icon, tier, winRate, pickRate, raw, updatedAt, pinyin, pinyinInitials)
+    INSERT OR REPLACE INTO champions (id, name, alias, title, icon, tier, winRate, pickRate, raw, updatedAt, pinyin, pinyin_initials)
     VALUES (@id, @name, @alias, @title, @icon, @tier, @winRate, @pickRate, @raw, @updatedAt, @pinyin, @pinyinInitials)
   `);
   const txChamp = db.transaction((list) => {

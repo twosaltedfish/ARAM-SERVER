@@ -71,7 +71,7 @@ app.get('/api/champions', (req, res) => {
       (customAliasMap[r.champion_id] || (customAliasMap[r.champion_id] = [])).push(r.alias);
     }
     const rows = db
-      .prepare('SELECT id, name, alias, title, icon, tier, winRate FROM champions ORDER BY winRate DESC')
+      .prepare('SELECT id, name, alias, title, icon, tier, winRate, pinyin, pinyinInitials FROM champions ORDER BY winRate DESC')
       .all();
     const champions = rows.map((r) => {
       const custom = customAliasMap[r.id] || [];
@@ -80,6 +80,8 @@ app.get('/api/champions', (req, res) => {
         name: r.name,
         alias: r.alias, // 仅展示数据源原始别名，避免页面堆一堆别名
         aliases: custom, // 自定义别名数组，前端搜索时与 alias 一起匹配
+        pinyin: r.pinyin || '', // 全拼（拼音搜索用，随英雄榜同步写入）
+        pinyinInitials: r.pinyinInitials || '', // 首字母（如 ys）
         title: r.title,
         iconUrl: r.icon,
         tier: r.tier,

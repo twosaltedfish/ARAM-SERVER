@@ -1,6 +1,7 @@
 'use strict';
 
 require('dotenv').config();
+const { pinyin } = require('pinyin-pro');
 const { db, getMeta, setMeta } = require('./db');
 const { fetchThrottled, normalizeChampion, keyPoolSize } = require('./lib/dtodo');
 
@@ -39,7 +40,7 @@ function isToday(dateStr) {
 }
 // 从本地库读取已存的英雄榜（用于命中当日缓存时跳过重新拉取）；含 raw 列以便缓存路径沿用已存原始 JSON
 function loadChampionsFromDb() {
-  return db.prepare('SELECT id,name,alias,title,icon,tier,winRate,pickRate,raw FROM champions').all();
+  return db.prepare('SELECT id,name,alias,title,icon,tier,winRate,pickRate,raw,pinyin,pinyinInitials FROM champions').all();
 }
 
 async function run() {
@@ -82,11 +83,20 @@ async function run() {
     champRawMap = new Map(champions.map((c, i) => [c.id, rawList[i]]));
     console.log(`[sync] 英雄榜 ${champions.length} 条`);
   }
+  // 同步阶段现算拼音：把中文 name 转成全拼 / 首字母，随英雄榜一起入库（一次计算，搜索只读）
+  if (champions && champions.length) {
+    for (const c of champions) {
+      if (c && typeof c.name === 'string') {
+        c.pinyin = pinyin(c.name, { toneType: 'none' }).join('');
+        c.pinyinInitials = pinyin(c.name, { pattern: 'first', toneType: 'none' }).join('');
+      }
+    }
+  }
   setMeta('championsDate', today);
 
   const upsertChamp = db.prepare(`
-    INSERT OR REPLACE INTO champions (id, name, alias, title, icon, tier, winRate, pickRate, raw, updatedAt)
-    VALUES (@id, @name, @alias, @title, @icon, @tier, @winRate, @pickRate, @raw, @updatedAt)
+    INSERT OR REPLACE INTO champions (id, name, alias, title, icon, tier, winRate, pickRate, raw, updatedAt, pinyin, pinyinInitials)
+    VALUES (@id, @name, @alias, @title, @icon, @tier, @winRate, @pickRate, @raw, @updatedAt, @pinyin, @pinyinInitials)
   `);
   const txChamp = db.transaction((list) => {
     for (const c of list) {

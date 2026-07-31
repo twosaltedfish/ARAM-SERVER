@@ -122,6 +122,8 @@
       return (c.name || '').toLowerCase().includes(kw) ||
              (c.alias || '').toLowerCase().includes(kw) ||
              (c.aliases || []).join(',').toLowerCase().includes(kw) ||
+             (c.pinyin || '').toLowerCase().includes(kw) ||
+             (c.pinyinInitials || '').toLowerCase().includes(kw) ||
              (c.title || '').toLowerCase().includes(kw);
     });
     if (!filtered.length) { list.innerHTML = '<p class="muted" style="text-align:center;margin-top:40px">无匹配英雄</p>'; return; }

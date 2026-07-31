@@ -30,7 +30,9 @@ CREATE TABLE IF NOT EXISTS champions (
   tier     INTEGER,
   winRate  REAL,
   pickRate REAL,
-  raw      TEXT
+  raw      TEXT,
+  pinyin          TEXT,
+  pinyin_initials TEXT
 );
 
 CREATE TABLE IF NOT EXISTS champion_detail (
@@ -64,6 +66,14 @@ CREATE TABLE IF NOT EXISTS champion_aliases (
 for (const t of ['champions', 'augments', 'items']) {
   try {
     db.exec(`ALTER TABLE ${t} ADD COLUMN updatedAt TEXT`);
+  } catch (_) {
+    /* 列已存在则忽略 */
+  }
+}
+// 兼容旧库：champions 表补充 pinyin 两列（幂等，列已存在则静默跳过）
+for (const col of ['pinyin', 'pinyin_initials']) {
+  try {
+    db.exec(`ALTER TABLE champions ADD COLUMN ${col} TEXT`);
   } catch (_) {
     /* 列已存在则忽略 */
   }

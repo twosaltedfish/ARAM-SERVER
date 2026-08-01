@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>英雄详情源数据查看</title>
+<meta name="robots" content="noindex" />
+<style>
+  :root { --bg:#f7f8fa; --card:#fff; --line:#e6e8eb; --text:#1f2329; --sub:#8a9099;
+          --brand:#2563eb; --brand-d:#1d4ed8; --chip:#eef2ff; --chip-t:#3730a3; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif; }
+  header { position:sticky; top:0; background:rgba(255,255,255,.92); backdrop-filter:blur(6px);
+           border-bottom:1px solid var(--line); padding:14px 18px; z-index:10; }
+  h1 { font-size:18px; margin:0 0 6px; }
+  .muted { color:var(--sub); font-size:13px; }
+  main { max-width:1100px; margin:16px auto; padding:0 12px; }
+  .bar { display:flex; align-items:center; gap:12px; margin-bottom:12px; flex-wrap:wrap; }
+  input { flex:1; min-width:220px; padding:9px 12px; border:1px solid var(--line); border-radius:8px;
+          font-size:14px; outline:none; }
+  input:focus { border-color:var(--brand); }
+  button { cursor:pointer; border:none; border-radius:8px; padding:8px 14px; font-size:14px;
+           background:var(--brand); color:#fff; transition:.15s; }
+  button:hover { background:var(--brand-d); }
+  button:disabled { opacity:.55; cursor:default; }
+  pre { margin:0; padding:14px 16px; background:#0d1117; color:#e6edf3; border-radius:12px;
+        font-family:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace; font-size:12.5px;
+        line-height:1.55; overflow:auto; max-height:72vh; white-space:pre; }
+  .count { color:var(--sub); font-size:13px; }
+  .err { color:#e23b3b; font-size:13px; margin-bottom:12px; }
+  .toast { position:fixed; left:50%; bottom:28px; transform:translateX(-50%); background:#1f2329; color:#fff;
+           padding:10px 16px; border-radius:10px; font-size:14px; opacity:0; transition:.25s; pointer-events:none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>英雄详情源数据查看</h1>
+  <p class="muted">输入英雄 id，加载该英雄抓取后<strong>未经处理</strong>的原始数据（<code>champions.raw</code> 原样返回），与英雄详情页后端取数同源。</p>
+</header>
+<main>
+  <div class="bar">
+    <input id="cid" placeholder="英雄 id，如 1 / 266 / Akshan" autocomplete="off" />
+    <button id="load">加载源数据</button>
+    <span class="count" id="count">尚未加载</span>
+  </div>
+  <div class="err" id="err" hidden></div>
+  <pre id="json" hidden>// 输入英雄 id 后点击「加载源数据」，此处展示 /api/champions/:id/source 返回的原始 JSON</pre>
+</main>
+
+<script>
+  const $ = (s) => document.querySelector(s);
+
+  $('#load').addEventListener('click', async () => {
+    const id = $('#cid').value.trim();
+    const btn = $('#load');
+    if (!id) return showErr('请输入英雄 id');
+    btn.disabled = true;
+    $('#count').textContent = '加载中…';
+    $('#err').hidden = true;
+    try {
+      const res = await fetch('/api/champions/' + encodeURIComponent(id) + '/source');
+      const data = await res.json();
+      if (!res.ok) {
+        showErr((data.error || '加载失败') + (data.id ? '（id=' + data.id + '）' : ''));
+        return;
+      }
+      $('#json').textContent = JSON.stringify(data.raw, null, 2);
+      $('#json').hidden = false;
+      $('#count').textContent = '已加载英雄 id=' + id + ' 的源数据';
+    } catch (e) {
+      showErr('请求异常：' + e.message);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  function showErr(msg) {
+    const el = $('#err');
+    el.textContent = msg;
+    el.hidden = false;
+    $('#count').textContent = '加载失败';
+  }
+</script>
+</body>
+</html>

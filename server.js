@@ -99,7 +99,7 @@ app.get('/api/champions', (req, res) => {
 app.get('/api/champions-raw', (req, res) => {
   try {
     const rows = db
-      .prepare('SELECT id, name, updatedAt, raw FROM champions ORDER BY id')
+      .prepare('SELECT id, name, updatedAt,信仰 raw FROM champions ORDER BY id')
       .all();
     const champions = rows.map((r) => {
       let raw = null;
@@ -111,6 +111,25 @@ app.get('/api/champions-raw', (req, res) => {
       return { id: r.id, name: r.name, updatedAt: r.updatedAt, raw };
     });
     res.json({ source: sourceMeta(), count: champions.length, champions });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+// 单英雄详情源数据（抓取后未处理）：按 id 返回 champions.raw 原样，供源数据查看页使用。
+// 区别于 /api/champions（归一化子集）与 /api/champions-raw（全量），这里按 id 精确取数。
+app.get('/api/champions/:id/source', (req, res) => {
+  const id = String(req.params.id);
+  try {
+    const row = db.prepare('SELECT raw FROM champions WHERE id = ?').get(id);
+    if (!row) return res.status(404).json({ error: 'champion not found', id });
+    let raw = null;
+    try {
+      raw = row.raw ? JSON.parse(row.raw) : null;
+    } catch (e) {
+      raw = { __parseError: String(e), __rawText: row.raw };
+    }
+    res.json({ id, raw });
   } catch (e) {
     res.status(500).json({ error: String(e) });
   }

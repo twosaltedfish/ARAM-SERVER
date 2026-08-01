@@ -27,6 +27,7 @@
   pre { margin:0; padding:14px 16px; background:#0d1117; color:#e6edf3; border-radius:12px;
         font-family:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace; font-size:12.5px;
         line-height:1.55; overflow:auto; max-height:72vh; white-space:pre; }
+  #copy { margin-top: 12px; }
   .count { color:var(--sub); font-size:13px; }
   .err { color:#e23b3b; font-size:13px; margin-bottom:12px; }
   .toast { position:fixed; left:50%; bottom:28px; transform:translateX(-50%); background:#1f2329; color:#fff;
@@ -46,6 +47,7 @@
   </div>
   <div class="err" id="err" hidden></div>
   <pre id="json" hidden>// 输入英雄 id 后点击「加载源数据」，此处展示 /api/champions/:id/source 返回的原始 JSON</pre>
+  <button id="copy" hidden>复制 JSON</button>
 </main>
 
 <script>
@@ -67,6 +69,7 @@
       }
       $('#json').textContent = JSON.stringify(data.raw, null, 2);
       $('#json').hidden = false;
+      $('#copy').hidden = false;
       $('#count').textContent = '已加载英雄 id=' + id + ' 的源数据';
     } catch (e) {
       showErr('请求异常：' + e.message);
@@ -81,6 +84,26 @@
     el.hidden = false;
     $('#count').textContent = '加载失败';
   }
+
+  // 复制 JSON 到剪贴板（安全上下文 https 下 navigator.clipboard 可用）
+  $('#copy').addEventListener('click', async () => {
+    const pre = $('#json');
+    if (pre.hidden || !pre.textContent.trim()) return;
+    const txt = pre.textContent;
+    try {
+      await navigator.clipboard.writeText(txt);
+      $('#count').textContent = '已复制，可直接粘贴到文档分析';
+    } catch (e) {
+      // 降级方案：execCommand
+      const ta = document.createElement('textarea');
+      ta.value = txt;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      $('#count').textContent = '已复制，可直接粘贴到文档分析';
+    }
+  });
 </script>
 </body>
 </html>

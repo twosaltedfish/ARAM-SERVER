@@ -116,18 +116,18 @@ app.get('/api/champions-raw', (req, res) => {
   }
 });
 
-// 单英雄详情源数据（抓取后未处理）：按 id 返回 champions.raw 原样，供源数据查看页使用。
-// 区别于 /api/champions（归一化子集）与 /api/champions-raw（全量），这里按 id 精确取数。
+// 单英雄详情源数据（查 champion_detail 表）：按 id 精确取数，返回该英雄抓取后未处理的 payload 原样。
+// 区别于 /api/champions（归一化子集）与 /api/champions-raw（全量 champions.raw），这里读 champion_detail.payload。
 app.get('/api/champions/:id/source', (req, res) => {
   const id = String(req.params.id);
   try {
-    const row = db.prepare('SELECT raw FROM champions WHERE id = ?').get(id);
+    const row = db.prepare('SELECT payload FROM champion_detail WHERE id = ?').get(id);
     if (!row) return res.status(404).json({ error: 'champion not found', id });
     let raw = null;
     try {
-      raw = row.raw ? JSON.parse(row.raw) : null;
+      raw = row.payload ? JSON.parse(row.payload) : null;
     } catch (e) {
-      raw = { __parseError: String(e), __rawText: row.raw };
+      raw = { __parseError: String(e), __payloadText: row.payload };
     }
     res.json({ id, raw });
   } catch (e) {

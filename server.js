@@ -71,7 +71,7 @@ app.get('/api/champions', (req, res) => {
       (customAliasMap[r.champion_id] || (customAliasMap[r.champion_id] = [])).push(r.alias);
     }
     const rows = db
-      .prepare('SELECT id, name, alias, title, icon, tier, winRate, pinyin, pinyin_initials FROM champions ORDER BY winRate DESC')
+      .prepare('SELECT id, name, alias, title, icon, tier, winRate, pinyin, pinyin_initials FROM champions ORDER BY tier ASC, winRate DESC')
       .all();
     const champions = rows.map((r) => {
       const custom = customAliasMap[r.id] || [];

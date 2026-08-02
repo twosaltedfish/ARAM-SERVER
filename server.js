@@ -6,6 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const { db, getMeta } = require('./db');
 const { normalizeChampionDetail } = require('./lib/dtodo');
+const { pinyin } = require('pinyin-pro');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -75,13 +76,23 @@ app.get('/api/champions', (req, res) => {
       .all();
     const champions = rows.map((r) => {
       const custom = customAliasMap[r.id] || [];
+      // 实时把自定义别名(aliases)与称号(title)的中文转拼音，拼入拼音字段，
+      // 使拼音/首字母搜索也能命中别名与称号。放在接口层而非同步存库，
+      // 这样用户新增的自定义别名无需重新同步即可被拼音搜到。
+      const pyName = r.pinyin || '';
+      const pyInitialsName = r.pinyin_initials || '';
+      const aliasPy = custom.map((a) => pinyin(a || '', { toneType: 'none' }).replace(/\s/g, '')).join('');
+      const aliasInitials = custom.map((a) => pinyin(a || '', { pattern: 'first', toneType: 'none' }).replace(/\s/g, '')).join('');
+      const titlePy = pinyin(r.title || '', { toneType: 'none' }).replace(/\s/g, '');
+      const titleInitials = pinyin(r.title || '', { pattern: 'first', toneType: 'none' }).replace(/\s/g, '');
       return {
         id: r.id,
         name: r.name,
         alias: r.alias, // 仅展示数据源原始别名，避免页面堆一堆别名
         aliases: custom, // 自定义别名数组，前端搜索时与 alias 一起匹配
-        pinyin: r.pinyin || '', // 全拼（拼音搜索用，随英雄榜同步写入）
-        pinyinInitials: r.pinyin_initials || '', // 首字母（如 ys）
+        // 综合拼音（name 同步写入 + 自定义别名 + 称号），全小写便于前端 indexOf 比对
+        pinyin: (pyName + aliasPy + titlePy).toLowerCase(),
+        pinyinInitials: (pyInitialsName + aliasInitials + titleInitials).toLowerCase(),
         title: r.title,
         iconUrl: r.icon,
         tier: r.tier,

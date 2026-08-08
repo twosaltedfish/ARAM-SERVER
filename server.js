@@ -110,7 +110,7 @@ app.get('/api/champions', (req, res) => {
 app.get('/api/champions-raw', (req, res) => {
   try {
     const rows = db
-      .prepare('SELECT id, name, updatedAt,信仰 raw FROM champions ORDER BY id')
+      .prepare('SELECT id, name, updatedAt, raw FROM champions ORDER BY id')
       .all();
     const champions = rows.map((r) => {
       let raw = null;
@@ -324,6 +324,44 @@ app.get('/api/items', (req, res) => {
   try {
     const rows = db.prepare('SELECT payload FROM items').all();
     res.json({ source: sourceMeta(), items: rows.map((r) => JSON.parse(r.payload)) });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+// 海克斯强化「详情」：来自 /data/aram-mayhem-augments.zh_cn.json 的全量详细数据（按 id 拆分存储）
+app.get('/api/augments-details', (req, res) => {
+  try {
+    const rows = db.prepare('SELECT payload FROM augment_details').all();
+    res.json({ source: sourceMeta(), augments: rows.map((r) => JSON.parse(r.payload)) });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+app.get('/api/augments-details/:id', (req, res) => {
+  try {
+    const row = db.prepare('SELECT payload FROM augment_details WHERE id = ?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'not found' });
+    res.json(JSON.parse(row.payload));
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+// 装备「详情」：来自 /data/items-zh_cn.json 的全量详细数据（按 id 拆分存储）
+app.get('/api/items-details', (req, res) => {
+  try {
+    const rows = db.prepare('SELECT payload FROM item_details').all();
+    res.json({ source: sourceMeta(), items: rows.map((r) => JSON.parse(r.payload)) });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+app.get('/api/items-details/:id', (req, res) => {
+  try {
+    const row = db.prepare('SELECT payload FROM item_details WHERE id = ?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'not found' });
+    res.json(JSON.parse(row.payload));
   } catch (e) {
     res.status(500).json({ error: String(e) });
   }

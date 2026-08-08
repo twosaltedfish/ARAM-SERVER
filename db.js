@@ -51,6 +51,22 @@ CREATE TABLE IF NOT EXISTS items (
   payload TEXT
 );
 
+-- 海克斯强化「详情」：单个文件 aram-mayhem-augments.zh_cn.json 的全量详细数据，按 id 拆分存储。
+-- 与 augments（列表摘要）区分：列表只含 id/name/icon 等摘要，详情含描述、数值等完整字段。
+CREATE TABLE IF NOT EXISTS augment_details (
+  id        TEXT PRIMARY KEY,
+  payload   TEXT,
+  updatedAt TEXT
+);
+
+-- 装备「详情」：单个文件 items-zh_cn.json 的全量详细数据，按 id 拆分存储。
+-- 与 items（列表摘要）区分：列表只含 id/name/icon 等摘要，详情含描述、属性等完整字段。
+CREATE TABLE IF NOT EXISTS item_details (
+  id        TEXT PRIMARY KEY,
+  payload   TEXT,
+  updatedAt TEXT
+);
+
 -- 用户自定义英雄别名：独立于 champions 表，sync 重刷不会覆盖。
 -- champion_id 对应 champions.id（TEXT），alias 为自定义别名。
 CREATE TABLE IF NOT EXISTS champion_aliases (

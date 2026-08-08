@@ -12,8 +12,12 @@
 // 典型用法：
 //   先只下载：IMG_NO_DB=1 node scripts/img-sync.js
 //   确认无误后再写库：node scripts/img-sync.js
+//
+// 注意：必须在 require('../db') 之前加载 dotenv，否则读不到 .env 里的 DB_PATH，
+// 会落到默认路径（与后端实际库不一致、查到 0 行）。
 
-const { db } = require('../db');
+require('dotenv').config();
+const { db, DB_PATH } = require('../db');
 const { downloadIcon } = require('../lib/icon-sync');
 
 const BASE_URL = process.env.IMG_BASE_URL || 'https://www.liceworld.online';
@@ -108,6 +112,7 @@ async function syncTable(cfg) {
 
 async function main() {
   const mode = WRITE_DB ? '下载并改写库字段' : '仅下载（不改写库，IMG_NO_DB=1）';
+  console.log(`[img-sync] 使用数据库：${DB_PATH}`);
   console.log(`[img-sync] 开始（模式：${mode} | BASE_URL=${BASE_URL}, 并发=${CONCURRENCY}）`);
   const total = { downloaded: 0, skipped: 0, failed: 0 };
   for (const cfg of TABLES) {

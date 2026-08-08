@@ -1,0 +1,12 @@
+# 运行时生成：img-sync 下载的图标
+public/icons/
+
+# 运行时数据库（better-sqlite3 数据文件）
+data/
+
+# 密钥 / 环境变量（含 API Key）
+.env
+.env.local
+
+# 依赖
+node_modules/

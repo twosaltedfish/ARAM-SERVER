@@ -4,13 +4,22 @@
 // 下载到本地 public/icons，并把库内 URL 改写为自有域名。
 // 与 fetch-data.js 完全解耦——只读取已有 iconUrl，不拉取任何第三方数据、不消耗 API credits。
 // 运行：node scripts/img-sync.js
-// 可选环境变量：IMG_BASE_URL（默认 https://www.liceworld.online）、IMG_CONCURRENCY（默认 12）
+// 可选环境变量：
+//   IMG_BASE_URL       自有域名（默认 https://www.liceworld.online）
+//   IMG_CONCURRENCY     并发数（默认 12）
+//   IMG_NO_DB=1         只下载到本地 public/icons，不改写库内 iconUrl 字段（先跑下载时用）
+//
+// 典型用法：
+//   先只下载：IMG_NO_DB=1 node scripts/img-sync.js
+//   确认无误后再写库：node scripts/img-sync.js
 
 const { db } = require('../db');
 const { downloadIcon } = require('../lib/icon-sync');
 
 const BASE_URL = process.env.IMG_BASE_URL || 'https://www.liceworld.online';
 const CONCURRENCY = Math.max(1, parseInt(process.env.IMG_CONCURRENCY, 10) || 12);
+// 默认改写库字段；设 IMG_NO_DB=1 时只落盘不写库
+const WRITE_DB = process.env.IMG_NO_DB !== '1';
 
 // 三张列表表配置。champions 用独立 icon 列；augments/items 图标在 payload JSON 的 iconUrl 字段。
 const TABLES = [
@@ -53,7 +62,7 @@ async function processColumnRow(cfg, row) {
   const remoteUrl = row[cfg.col];
   if (!remoteUrl) return { status: 'skip', reason: 'no-icon' };
   const r = await downloadIcon(cfg.category, row.id, remoteUrl, { baseUrl: BASE_URL });
-  if (r.status === 'downloaded') {
+  if (r.status === 'downloaded' && WRITE_DB) {
     db.prepare(`UPDATE ${cfg.table} SET ${cfg.col} = ? WHERE id = ?`).run(r.localUrl, row.id);
   }
   return r;
@@ -71,7 +80,7 @@ async function processPayloadRow(cfg, row) {
   if (!keyName) return { status: 'skip', reason: 'no-icon' };
   const remoteUrl = obj[keyName];
   const r = await downloadIcon(cfg.category, row.id, remoteUrl, { baseUrl: BASE_URL });
-  if (r.status === 'downloaded') {
+  if (r.status === 'downloaded' && WRITE_DB) {
     obj[keyName] = r.localUrl;
     db.prepare(`UPDATE ${cfg.table} SET payload = ? WHERE id = ?`).run(JSON.stringify(obj), row.id);
   }
@@ -98,7 +107,8 @@ async function syncTable(cfg) {
 }
 
 async function main() {
-  console.log(`[img-sync] 开始（BASE_URL=${BASE_URL}, 并发=${CONCURRENCY}）`);
+  const mode = WRITE_DB ? '下载并改写库字段' : '仅下载（不改写库，IMG_NO_DB=1）';
+  console.log(`[img-sync] 开始（模式：${mode} | BASE_URL=${BASE_URL}, 并发=${CONCURRENCY}）`);
   const total = { downloaded: 0, skipped: 0, failed: 0 };
   for (const cfg of TABLES) {
     const s = await syncTable(cfg);
@@ -108,7 +118,10 @@ async function main() {
   }
   console.log(`[img-sync] 全部完成 ✅ 下载 ${total.downloaded} / 跳过 ${total.skipped} / 失败 ${total.failed}`);
   if (total.failed > 0) {
-    console.log('[img-sync] 失败项已保留原第三方 URL，可重跑本脚本重试');
+    console.log('[img-sync] 失败项可重跑本脚本重试（仅下载模式也会重试下载）');
+  }
+  if (!WRITE_DB) {
+    console.log('[img-sync] 当前为仅下载模式，库内 iconUrl 未改动。确认无误后去掉 IMG_NO_DB=1 重新运行即可改写库字段。');
   }
 }
 

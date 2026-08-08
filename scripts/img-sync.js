@@ -1,11 +1,11 @@
 'use strict';
 
 // 独立图片同步脚本：把 champions / augments / items 三张列表表中已有的第三方图标
-// 下载到本地 public/icons，并把库内 URL 改写为自有域名。
+// 下载到本地 public/icons，并把库内 URL 改写为自有域名（cdn.liceworld.online）。
 // 与 fetch-data.js 完全解耦——只读取已有 iconUrl，不拉取任何第三方数据、不消耗 API credits。
 // 运行：node scripts/img-sync.js
 // 可选环境变量：
-//   IMG_BASE_URL       自有域名（默认 https://www.liceworld.online）
+//   IMG_BASE_URL       图标服务域名（默认 https://cdn.liceworld.online；如需用其它域覆盖）
 //   IMG_CONCURRENCY     并发数（默认 12）
 //   IMG_NO_DB=1         只下载到本地 public/icons，不改写库内 iconUrl 字段（先跑下载时用）
 //
@@ -20,7 +20,7 @@ require('dotenv').config();
 const { db, DB_PATH } = require('../db');
 const { downloadIcon } = require('../lib/icon-sync');
 
-const BASE_URL = process.env.IMG_BASE_URL || 'https://www.liceworld.online';
+const BASE_URL = process.env.IMG_BASE_URL || 'https://cdn.liceworld.online';
 const CONCURRENCY = Math.max(1, parseInt(process.env.IMG_CONCURRENCY, 10) || 12);
 // 默认改写库字段；设 IMG_NO_DB=1 时只落盘不写库
 const WRITE_DB = process.env.IMG_NO_DB !== '1';

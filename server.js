@@ -23,6 +23,9 @@ app.use((req, res, next) => {
 // 解析 JSON 请求体（POST/DELETE 添加别名时使用）
 app.use(express.json());
 
+// 图标静态托管已移出 Node 进程：图片由独立子域 cdn.liceworld.online 的源站 nginx
+// 直接 serve（location /icons），经京东云 CDN 加速，不经过本进程。详见 ICON_SELF_HOST_PLAN.md。
+
 // 可选管理员鉴权：仅当配置了 ADMIN_TOKEN 环境变量时才校验，
 // 调用写接口需带请求头 x-admin-token 或查询参数 ?token=...；未配置则放行（个人项目便捷）。
 function requireAdmin(req, res, next) {

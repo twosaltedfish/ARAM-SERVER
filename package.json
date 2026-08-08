@@ -8,6 +8,8 @@
     "start": "node server.js",
     "sync": "node fetch-data.js",
     "sync-pinyin": "node sync-pinyin.js",
+    "img-sync": "node scripts/img-sync.js",
+    "img-sync:download": "IMG_NO_DB=1 node scripts/img-sync.js",
     "dev": "node server.js"
   },
   "dependencies": {
